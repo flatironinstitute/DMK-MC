@@ -8,6 +8,19 @@
 #include <sctl.hpp>
 
 namespace hpdmk {
+    inline void ensure_mpi_initialized() {
+        int initialized = 0;
+        if (MPI_Initialized(&initialized) != MPI_SUCCESS) {
+            throw std::runtime_error("MPI_Initialized failed");
+        }
+        if (!initialized) {
+            int provided = MPI_THREAD_SINGLE;
+            if (MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SINGLE, &provided) != MPI_SUCCESS) {
+                throw std::runtime_error("MPI_Init_thread failed");
+            }
+        }
+    }
+
     template <typename Real>
     inline hpdmk_tree create_tree(MPI_Comm comm, HPDMKParams params, int n_src, const Real *r_src, const Real *charge) {
         if (n_src < 0) {
@@ -111,11 +124,24 @@ namespace hpdmk {
 extern "C" {
     hpdmk_tree hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge) {
         try {
+            hpdmk::ensure_mpi_initialized();
             return hpdmk::create_tree<double>(comm, params, n_src, r_src, charge);
         } catch (const std::exception &ex) {
             std::fprintf(stderr, "hpdmk_tree_create failed: %s\n", ex.what());
         } catch (...) {
             std::fprintf(stderr, "hpdmk_tree_create failed due to an unknown exception\n");
+        }
+        return nullptr;
+    }
+
+    hpdmk_tree hpdmk_tree_create_f(MPI_Comm comm, HPDMKParams params, int n_src, const float *r_src, const float *charge) {
+        try {
+            hpdmk::ensure_mpi_initialized();
+            return hpdmk::create_tree<float>(comm, params, n_src, r_src, charge);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_tree_create_f failed: %s\n", ex.what());
+        } catch (...) {
+            std::fprintf(stderr, "hpdmk_tree_create_f failed due to an unknown exception\n");
         }
         return nullptr;
     }
@@ -128,6 +154,14 @@ extern "C" {
         }
     }
 
+    void hpdmk_tree_destroy_f(hpdmk_tree tree) {
+        try {
+            hpdmk::destroy_tree<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_tree_destroy_f failed: %s\n", ex.what());
+        }
+    }
+
     void hpdmk_tree_form_outgoing_pw(hpdmk_tree tree) {
         try {
             hpdmk::form_outgoing_pw<double>(tree);
@@ -136,11 +170,27 @@ extern "C" {
         }
     }
 
+    void hpdmk_tree_form_outgoing_pw_f(hpdmk_tree tree) {
+        try {
+            hpdmk::form_outgoing_pw<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_tree_form_outgoing_pw_f failed: %s\n", ex.what());
+        }
+    }
+
     void hpdmk_tree_form_incoming_pw(hpdmk_tree tree) {
         try {
             hpdmk::form_incoming_pw<double>(tree);
         } catch (const std::exception &ex) {
             std::fprintf(stderr, "hpdmk_tree_form_incoming_pw failed: %s\n", ex.what());
+        }
+    }
+
+    void hpdmk_tree_form_incoming_pw_f(hpdmk_tree tree) {
+        try {
+            hpdmk::form_incoming_pw<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_tree_form_incoming_pw_f failed: %s\n", ex.what());
         }
     }
 
@@ -153,6 +203,15 @@ extern "C" {
         return 0.0;
     }
 
+    float hpdmk_eval_energy_f(hpdmk_tree tree) {
+        try {
+            return hpdmk::eval_energy<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_eval_energy_f failed: %s\n", ex.what());
+        }
+        return 0.0f;
+    }
+
     double hpdmk_eval_energy_window(hpdmk_tree tree) {
         try {
             return hpdmk::eval_energy_window<double>(tree);
@@ -160,6 +219,15 @@ extern "C" {
             std::fprintf(stderr, "hpdmk_eval_energy_window failed: %s\n", ex.what());
         }
         return 0.0;
+    }
+
+    float hpdmk_eval_energy_window_f(hpdmk_tree tree) {
+        try {
+            return hpdmk::eval_energy_window<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_eval_energy_window_f failed: %s\n", ex.what());
+        }
+        return 0.0f;
     }
 
     double hpdmk_eval_energy_diff(hpdmk_tree tree) {
@@ -171,6 +239,15 @@ extern "C" {
         return 0.0;
     }
 
+    float hpdmk_eval_energy_diff_f(hpdmk_tree tree) {
+        try {
+            return hpdmk::eval_energy_diff<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_eval_energy_diff_f failed: %s\n", ex.what());
+        }
+        return 0.0f;
+    }
+
     double hpdmk_eval_energy_res(hpdmk_tree tree) {
         try {
             return hpdmk::eval_energy_res<double>(tree);
@@ -178,6 +255,15 @@ extern "C" {
             std::fprintf(stderr, "hpdmk_eval_energy_res failed: %s\n", ex.what());
         }
         return 0.0;
+    }
+
+    float hpdmk_eval_energy_res_f(hpdmk_tree tree) {
+        try {
+            return hpdmk::eval_energy_res<float>(tree);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_eval_energy_res_f failed: %s\n", ex.what());
+        }
+        return 0.0f;
     }
 
     double hpdmk_eval_shift_energy(hpdmk_tree tree, long long i_particle, double dx, double dy, double dz) {
@@ -189,11 +275,28 @@ extern "C" {
         return 0.0;
     }
 
+    float hpdmk_eval_shift_energy_f(hpdmk_tree tree, long long i_particle, float dx, float dy, float dz) {
+        try {
+            return hpdmk::eval_shift_energy<float>(tree, i_particle, dx, dy, dz);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_eval_shift_energy_f failed: %s\n", ex.what());
+        }
+        return 0.0f;
+    }
+
     void hpdmk_update_shift(hpdmk_tree tree, long long i_particle, double dx, double dy, double dz) {
         try {
             hpdmk::update_shift<double>(tree, i_particle, dx, dy, dz);
         } catch (const std::exception &ex) {
             std::fprintf(stderr, "hpdmk_update_shift failed: %s\n", ex.what());
+        }
+    }
+
+    void hpdmk_update_shift_f(hpdmk_tree tree, long long i_particle, float dx, float dy, float dz) {
+        try {
+            hpdmk::update_shift<float>(tree, i_particle, dx, dy, dz);
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_update_shift_f failed: %s\n", ex.what());
         }
     }
 }

@@ -38,7 +38,6 @@ using Pkg
 Pkg.activate("julia")
 using PDMK4MC
 
-MPI.Init()
 params = PDMK4MC.HPDMKParams(L = 20.0)
 coords = rand(3, 100)
 charges = randn(100)
@@ -48,4 +47,5 @@ energy = PDMK4MC.eval_energy(tree)
 
 By default the wrapper looks for `libhpdmk` using the standard library search path. Set the
 environment variable `HPDMK_LIBRARY` to point to the shared library if it lives in a non-standard
-location.
+location. `create_tree` will initialise MPI automatically if needed, and the optional `precision`
+keyword can be used to select either `Float64` (default) or `Float32` computations.

@@ -1,7 +1,7 @@
 module PDMK4MC
 
 using MPI
-using Base: Cdouble, Cint, Clonglong
+using Base: Cdouble, Cfloat, Cint, Clonglong
 import Base: length
 
 export HPDMKParams, hpdmk_init, DIRECT, PROXY, Tree,
@@ -24,37 +24,54 @@ Base.@kwdef struct HPDMKParams
     init::hpdmk_init = PROXY
 end
 
-mutable struct Tree
+mutable struct Tree{T<:AbstractFloat}
     handle::Ptr{Cvoid}
-    coords::Vector{Cdouble}
-    charges::Vector{Cdouble}
+    coords::Vector{T}
+    charges::Vector{T}
     n_particles::Int
 end
 
 length(tree::Tree) = tree.n_particles
 
-function _coords_buffer(r_src::AbstractMatrix{<:Real})
+_as_precision(::Type{T}) where {T<:AbstractFloat} = T
+_as_precision(precision::Nothing) = nothing
+_as_precision(::Any) = throw(ArgumentError("precision must be either Float32 or Float64"))
+
+function _resolve_precision(precision, r_src, charge)
+    T = _as_precision(precision)
+    if T === nothing
+        coords_T = eltype(r_src)
+        charge_T = eltype(charge)
+        if coords_T <: AbstractFloat && charge_T <: AbstractFloat && coords_T <: Float32 && charge_T <: Float32
+            return Float32
+        end
+        return Float64
+    end
+    return T
+end
+
+function _coords_buffer(::Type{T}, r_src::AbstractMatrix{<:Real}) where {T<:AbstractFloat}
     size(r_src, 1) == 3 || throw(ArgumentError("source coordinate matrix must have size (3, N)"))
     n = size(r_src, 2)
-    buf = Vector{Cdouble}(undef, 3n)
-    copyto!(buf, vec(Matrix{Float64}(r_src)))
+    buf = Vector{T}(undef, 3n)
+    copyto!(buf, vec(Matrix{T}(r_src)))
     return buf, n
 end
 
-function _coords_buffer(r_src::AbstractVector{<:Real})
+function _coords_buffer(::Type{T}, r_src::AbstractVector{<:Real}) where {T<:AbstractFloat}
     length(r_src) % 3 == 0 || throw(ArgumentError("source coordinate vector length must be a multiple of 3"))
-    buf = Vector{Cdouble}(Float64.(r_src))
+    buf = Vector{T}(T.(r_src))
     n = length(buf) ÷ 3
     return buf, n
 end
 
-function _coords_buffer(r_src)
+function _coords_buffer(::Type{T}, r_src) where {T<:AbstractFloat}
     throw(ArgumentError("unsupported container for source coordinates"))
 end
 
-_charges_buffer(charge::AbstractVector{<:Real}, n::Integer) = begin
+_charges_buffer(::Type{T}, charge::AbstractVector{<:Real}, n::Integer) where {T<:AbstractFloat} = begin
     length(charge) == n || throw(ArgumentError("charge vector must have the same length as the number of particles"))
-    Vector{Cdouble}(Float64.(charge))
+    Vector{T}(T.(charge))
 end
 
 function _to_comm(comm::MPI.Comm)
@@ -70,27 +87,36 @@ function _to_comm(::Nothing)
 end
 
 """
-    create_tree(r_src, charge; params=HPDMKParams(), comm=MPI.COMM_WORLD)
+    create_tree(r_src, charge; params=HPDMKParams(), comm=MPI.COMM_WORLD, precision=nothing)
 
 Create a hierarchical PDMK tree from source coordinates ``r_src`` and particle charges ``charge``.
 
 The coordinate container can either be a ``3×N`` matrix or a length ``3N`` vector with
-``x₁,y₁,z₁,\ldots,x_N,y_N,z_N`` ordering.  The communicator is forwarded to the underlying MPI
-implementation; make sure to call `MPI.Init` before creating a tree.
+``x₁,y₁,z₁,\ldots,x_N,y_N,z_N`` ordering.  MPI is initialised automatically when needed.  The
+optional ``precision`` keyword controls the floating-point type (`Float32` or `Float64`); by default
+it is inferred from the input arrays.
 """
-function create_tree(r_src, charge; params::HPDMKParams=HPDMKParams(), comm=MPI.COMM_WORLD)
-    coords, n_src = _coords_buffer(r_src)
-    charges = _charges_buffer(charge, n_src)
-    handle = ccall((:hpdmk_tree_create, libhpdmk), Ptr{Cvoid},
-                   (MPI.MPI_Comm, HPDMKParams, Cint, Ptr{Cdouble}, Ptr{Cdouble}),
-                   _to_comm(comm), params, Cint(n_src), coords, charges)
+function create_tree(r_src, charge; params::HPDMKParams=HPDMKParams(), comm=MPI.COMM_WORLD, precision=nothing)
+    MPI.Initialized() || MPI.Init()
+    T = _resolve_precision(precision, r_src, charge)
+    coords, n_src = _coords_buffer(T, r_src)
+    charges = _charges_buffer(T, charge, n_src)
+    handle = if T === Float32
+        ccall((:hpdmk_tree_create_f, libhpdmk), Ptr{Cvoid},
+              (MPI.MPI_Comm, HPDMKParams, Cint, Ptr{Cfloat}, Ptr{Cfloat}),
+              _to_comm(comm), params, Cint(n_src), coords, charges)
+    else
+        ccall((:hpdmk_tree_create, libhpdmk), Ptr{Cvoid},
+              (MPI.MPI_Comm, HPDMKParams, Cint, Ptr{Cdouble}, Ptr{Cdouble}),
+              _to_comm(comm), params, Cint(n_src), coords, charges)
+    end
     handle == C_NULL && error("hpdmk_tree_create returned a null handle")
-    tree = Tree(handle, coords, charges, n_src)
+    tree = Tree{T}(handle, coords, charges, n_src)
     finalizer(destroy_tree!, tree)
     return tree
 end
 
-function destroy_tree!(tree::Tree)
+function destroy_tree!(tree::Tree{Float64})
     if tree.handle != C_NULL
         ccall((:hpdmk_tree_destroy, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
         tree.handle = C_NULL
@@ -98,31 +124,57 @@ function destroy_tree!(tree::Tree)
     return nothing
 end
 
-function form_outgoing_pw!(tree::Tree)
+function destroy_tree!(tree::Tree{Float32})
+    if tree.handle != C_NULL
+        ccall((:hpdmk_tree_destroy_f, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
+        tree.handle = C_NULL
+    end
+    return nothing
+end
+
+function form_outgoing_pw!(tree::Tree{Float64})
     ccall((:hpdmk_tree_form_outgoing_pw, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
     return tree
 end
 
-function form_incoming_pw!(tree::Tree)
+function form_outgoing_pw!(tree::Tree{Float32})
+    ccall((:hpdmk_tree_form_outgoing_pw_f, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
+    return tree
+end
+
+function form_incoming_pw!(tree::Tree{Float64})
     ccall((:hpdmk_tree_form_incoming_pw, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
     return tree
 end
 
-function eval_energy(tree::Tree)
-    return ccall((:hpdmk_eval_energy, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
+function form_incoming_pw!(tree::Tree{Float32})
+    ccall((:hpdmk_tree_form_incoming_pw_f, libhpdmk), Cvoid, (Ptr{Cvoid},), tree.handle)
+    return tree
 end
 
-function eval_energy_window(tree::Tree)
-    return ccall((:hpdmk_eval_energy_window, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
-end
+eval_energy(tree::Tree{Float64}) =
+    ccall((:hpdmk_eval_energy, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
 
-function eval_energy_diff(tree::Tree)
-    return ccall((:hpdmk_eval_energy_diff, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
-end
+eval_energy(tree::Tree{Float32}) =
+    ccall((:hpdmk_eval_energy_f, libhpdmk), Cfloat, (Ptr{Cvoid},), tree.handle)
 
-function eval_energy_res(tree::Tree)
-    return ccall((:hpdmk_eval_energy_res, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
-end
+eval_energy_window(tree::Tree{Float64}) =
+    ccall((:hpdmk_eval_energy_window, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
+
+eval_energy_window(tree::Tree{Float32}) =
+    ccall((:hpdmk_eval_energy_window_f, libhpdmk), Cfloat, (Ptr{Cvoid},), tree.handle)
+
+eval_energy_diff(tree::Tree{Float64}) =
+    ccall((:hpdmk_eval_energy_diff, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
+
+eval_energy_diff(tree::Tree{Float32}) =
+    ccall((:hpdmk_eval_energy_diff_f, libhpdmk), Cfloat, (Ptr{Cvoid},), tree.handle)
+
+eval_energy_res(tree::Tree{Float64}) =
+    ccall((:hpdmk_eval_energy_res, libhpdmk), Cdouble, (Ptr{Cvoid},), tree.handle)
+
+eval_energy_res(tree::Tree{Float32}) =
+    ccall((:hpdmk_eval_energy_res_f, libhpdmk), Cfloat, (Ptr{Cvoid},), tree.handle)
 
 """
     eval_shift_energy(tree, idx, dx, dy, dz)
@@ -130,12 +182,18 @@ end
 Return the energy change associated with shifting particle ``idx`` by the displacement
 ``(dx, dy, dz)``.  Particle indices use Julia's 1-based convention.
 """
-function eval_shift_energy(tree::Tree, idx::Integer, dx::Real, dy::Real, dz::Real)
+function eval_shift_energy(tree::Tree{T}, idx::Integer, dx::Real, dy::Real, dz::Real) where {T<:AbstractFloat}
     idx < 1 && throw(ArgumentError("particle index must be positive"))
     idx > tree.n_particles && throw(BoundsError(tree, idx))
-    return ccall((:hpdmk_eval_shift_energy, libhpdmk), Cdouble,
-                 (Ptr{Cvoid}, Clonglong, Cdouble, Cdouble, Cdouble),
-                 tree.handle, Clonglong(idx - 1), Cdouble(dx), Cdouble(dy), Cdouble(dz))
+    if T === Float32
+        return ccall((:hpdmk_eval_shift_energy_f, libhpdmk), Cfloat,
+                     (Ptr{Cvoid}, Clonglong, Cfloat, Cfloat, Cfloat),
+                     tree.handle, Clonglong(idx - 1), Cfloat(dx), Cfloat(dy), Cfloat(dz))
+    else
+        return ccall((:hpdmk_eval_shift_energy, libhpdmk), Cdouble,
+                     (Ptr{Cvoid}, Clonglong, Cdouble, Cdouble, Cdouble),
+                     tree.handle, Clonglong(idx - 1), Cdouble(dx), Cdouble(dy), Cdouble(dz))
+    end
 end
 
 """
@@ -144,12 +202,18 @@ end
 Apply a shift of particle ``idx`` by ``(dx, dy, dz)`` and update the internal tree state in place.
 Indices are 1-based.
 """
-function update_shift!(tree::Tree, idx::Integer, dx::Real, dy::Real, dz::Real)
+function update_shift!(tree::Tree{T}, idx::Integer, dx::Real, dy::Real, dz::Real) where {T<:AbstractFloat}
     idx < 1 && throw(ArgumentError("particle index must be positive"))
     idx > tree.n_particles && throw(BoundsError(tree, idx))
-    ccall((:hpdmk_update_shift, libhpdmk), Cvoid,
-          (Ptr{Cvoid}, Clonglong, Cdouble, Cdouble, Cdouble),
-          tree.handle, Clonglong(idx - 1), Cdouble(dx), Cdouble(dy), Cdouble(dz))
+    if T === Float32
+        ccall((:hpdmk_update_shift_f, libhpdmk), Cvoid,
+              (Ptr{Cvoid}, Clonglong, Cfloat, Cfloat, Cfloat),
+              tree.handle, Clonglong(idx - 1), Cfloat(dx), Cfloat(dy), Cfloat(dz))
+    else
+        ccall((:hpdmk_update_shift, libhpdmk), Cvoid,
+              (Ptr{Cvoid}, Clonglong, Cdouble, Cdouble, Cdouble),
+              tree.handle, Clonglong(idx - 1), Cdouble(dx), Cdouble(dy), Cdouble(dz))
+    end
     return tree
 end
 
