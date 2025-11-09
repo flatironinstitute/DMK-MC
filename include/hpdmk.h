@@ -22,7 +22,20 @@ typedef void *hpdmk_tree;
 extern "C" {
 #endif
 
-void hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge);
+
+hpdmk_tree hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge);
+void hpdmk_tree_destroy(hpdmk_tree tree);
+
+void hpdmk_tree_form_outgoing_pw(hpdmk_tree tree);
+void hpdmk_tree_form_incoming_pw(hpdmk_tree tree);
+
+double hpdmk_eval_energy(hpdmk_tree tree);
+double hpdmk_eval_energy_window(hpdmk_tree tree);
+double hpdmk_eval_energy_diff(hpdmk_tree tree);
+double hpdmk_eval_energy_res(hpdmk_tree tree);
+
+double hpdmk_eval_shift_energy(hpdmk_tree tree, long long i_particle, double dx, double dy, double dz);
+void hpdmk_update_shift(hpdmk_tree tree, long long i_particle, double dx, double dy, double dz);
 
 #ifdef __cplusplus
 }
