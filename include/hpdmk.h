@@ -16,16 +16,4 @@ typedef struct HPDMKParams {
     hpdmk_init init = PROXY; // method to initialize the outgoing planewave, DIRECT means direct calculation on all nodes, PROXY for proxy charge
 } HPDMKParams;
 
-typedef void *hpdmk_tree;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-void hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif
