@@ -23,6 +23,10 @@ extern "C" {
 #endif
 
 
+int hpdmk_mpi_init(void);
+int hpdmk_mpi_initialized(void);
+MPI_Comm hpdmk_comm_world(void);
+
 hpdmk_tree hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge);
 hpdmk_tree hpdmk_tree_create_f(MPI_Comm comm, HPDMKParams params, int n_src, const float *r_src, const float *charge);
 

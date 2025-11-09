@@ -32,7 +32,6 @@ A lightweight Julia wrapper is provided in the [`julia/`](julia) directory. Afte
 shared library (`libhpdmk`), activate the Julia project and construct trees directly from Julia:
 
 ```julia
-using MPI
 using Pkg
 
 Pkg.activate("julia")
@@ -47,5 +46,7 @@ energy = PDMK4MC.eval_energy(tree)
 
 By default the wrapper looks for `libhpdmk` using the standard library search path. Set the
 environment variable `HPDMK_LIBRARY` to point to the shared library if it lives in a non-standard
-location. `create_tree` will initialise MPI automatically if needed, and the optional `precision`
-keyword can be used to select either `Float64` (default) or `Float32` computations.
+location. The bindings ask `libhpdmk` itself to initialise MPI so that Julia and the native library
+always share the same MPI runtime; the optional `comm` keyword can be left as `nothing` to use the
+library's `MPI_COMM_WORLD`, or set to an existing communicator (for example `MPI.COMM_WORLD`). The
+`precision` keyword selects either `Float64` (default) or `Float32` computations.

@@ -11,6 +11,23 @@ export HPDMKParams, hpdmk_init, DIRECT, PROXY, Tree,
 
 const libhpdmk = get(ENV, "HPDMK_LIBRARY", "libhpdmk")
 
+function _hpdmk_mpi_init()
+    initialized = ccall((:hpdmk_mpi_initialized, libhpdmk), Cint, ())
+    if initialized == 0
+        status = ccall((:hpdmk_mpi_init, libhpdmk), Cint, ())
+        status != 0 || error("hpdmk_mpi_init failed")
+    end
+    return nothing
+end
+
+function _hpdmk_comm_world()
+    return ccall((:hpdmk_comm_world, libhpdmk), MPI.MPI_Comm, ())
+end
+
+function __init__()
+    _hpdmk_mpi_init()
+end
+
 @enum hpdmk_init::Cint begin
     DIRECT = 1
     PROXY = 2
@@ -74,30 +91,27 @@ _charges_buffer(::Type{T}, charge::AbstractVector{<:Real}, n::Integer) where {T<
     Vector{T}(T.(charge))
 end
 
-function _to_comm(comm::MPI.Comm)
-    return comm.val
-end
-
+_to_comm(comm::MPI.Comm) = comm.val
 _to_comm(comm::MPI.MPI_Comm) = comm
 _to_comm(comm::Ptr) = comm
 _to_comm(comm::Integer) = comm
-
-function _to_comm(::Nothing)
-    throw(ArgumentError("MPI communicator must be provided"))
-end
+_to_comm(::Nothing) = _hpdmk_comm_world()
 
 """
-    create_tree(r_src, charge; params=HPDMKParams(), comm=MPI.COMM_WORLD, precision=nothing)
+    create_tree(r_src, charge; params=HPDMKParams(), comm=nothing, precision=nothing)
 
 Create a hierarchical PDMK tree from source coordinates ``r_src`` and particle charges ``charge``.
 
 The coordinate container can either be a ``3×N`` matrix or a length ``3N`` vector with
-``x₁,y₁,z₁,\ldots,x_N,y_N,z_N`` ordering.  MPI is initialised automatically when needed.  The
-optional ``precision`` keyword controls the floating-point type (`Float32` or `Float64`); by default
-it is inferred from the input arrays.
+``x₁,y₁,z₁,\ldots,x_N,y_N,z_N`` ordering.  MPI is initialised automatically through ``libhpdmk``
+itself so that the Julia bindings always talk to the same MPI implementation as the native code.
+Passing ``comm=nothing`` uses the library's ``MPI_COMM_WORLD``; callers that already have a
+communicator (for example from MPI.jl) can provide it explicitly.  The optional ``precision``
+keyword controls the floating-point type (`Float32` or `Float64`); by default it is inferred from
+the input arrays.
 """
-function create_tree(r_src, charge; params::HPDMKParams=HPDMKParams(), comm=MPI.COMM_WORLD, precision=nothing)
-    MPI.Initialized() || MPI.Init()
+function create_tree(r_src, charge; params::HPDMKParams=HPDMKParams(), comm=nothing, precision=nothing)
+    _hpdmk_mpi_init()
     T = _resolve_precision(precision, r_src, charge)
     coords, n_src = _coords_buffer(T, r_src)
     charges = _charges_buffer(T, charge, n_src)

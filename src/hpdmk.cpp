@@ -22,6 +22,13 @@ namespace hpdmk {
     }
 
     template <typename Real>
+    inline MPI_Comm normalize_comm(MPI_Comm comm) {
+        if (comm == MPI_COMM_NULL) {
+            return MPI_COMM_WORLD;
+        }
+        return comm;
+    }
+
     inline hpdmk_tree create_tree(MPI_Comm comm, HPDMKParams params, int n_src, const Real *r_src, const Real *charge) {
         if (n_src < 0) {
             throw std::invalid_argument("number of sources must be non-negative");
@@ -30,7 +37,7 @@ namespace hpdmk {
             throw std::invalid_argument("source and charge pointers must be non-null");
         }
 
-        const sctl::Comm sctl_comm(comm);
+        const sctl::Comm sctl_comm(normalize_comm(comm));
 
         sctl::Vector<Real> r_src_vec(n_src * 3, const_cast<Real *>(r_src), false);
         sctl::Vector<Real> charge_vec(n_src, const_cast<Real *>(charge), false);
@@ -122,6 +129,30 @@ namespace hpdmk {
 }
 
 extern "C" {
+    int hpdmk_mpi_init(void) {
+        try {
+            hpdmk::ensure_mpi_initialized();
+            return 1;
+        } catch (const std::exception &ex) {
+            std::fprintf(stderr, "hpdmk_mpi_init failed: %s\n", ex.what());
+        } catch (...) {
+            std::fprintf(stderr, "hpdmk_mpi_init failed due to an unknown exception\n");
+        }
+        return 0;
+    }
+
+    int hpdmk_mpi_initialized(void) {
+        int initialized = 0;
+        if (MPI_Initialized(&initialized) != MPI_SUCCESS) {
+            return 0;
+        }
+        return initialized;
+    }
+
+    MPI_Comm hpdmk_comm_world(void) {
+        return MPI_COMM_WORLD;
+    }
+
     hpdmk_tree hpdmk_tree_create(MPI_Comm comm, HPDMKParams params, int n_src, const double *r_src, const double *charge) {
         try {
             hpdmk::ensure_mpi_initialized();
